@@ -375,6 +375,8 @@ AC_CHECK_HEADERS([ \
 	langinfo.h \
 	limits.h \
 	locale.h \
+	iconv.h \
+	langinfo.h \
 	login.h \
 	maillock.h \
 	ndir.h \
@@ -4825,6 +4827,15 @@ AC_ARG_ENABLE([pututxline],
 			AC_DEFINE([DISABLE_PUTUTXLINE], [1],
 				[Define if you don't want to use pututxline()
 				etc. to write [uw]tmpx])
+		fi
+	]
+)
+AC_ARG_ENABLE([unicode],
+	[  --disable-unicode       disable use of unicode [no]],
+	[
+		if test "x$enableval" = "xno" ; then
+			AC_DEFINE([DISABLE_UNICODE], [1],
+				[Define if you don't want to use unicode])
 		fi
 	]
 )

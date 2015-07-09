@@ -874,4 +874,9 @@ struct winsize {
 # define USE_SYSTEM_GLOB
 #endif
 
+#if defined(HAVE_LOCALE_H) && defined(HAVE_ICONV_H) && \
+    defined(HAVE_LANGINFO_H) && !defined(DISABLE_UNICODE)
+# define USE_UNICODE
+#endif
+
 #endif /* _DEFINES_H */

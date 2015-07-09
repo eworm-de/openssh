@@ -43,6 +43,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <resolv.h>
+#ifdef USE_UNICODE
+#include <locale.h>
+#include <unistd.h>
+#include <iconv.h>
+#include <langinfo.h>
+#endif /* USE_UNICODE */
 #ifdef HAVE_UTIL_H
 #include <util.h>
 #endif /* HAVE_UTIL_H */
@@ -1056,16 +1062,74 @@ fingerprint_randomart(const char *alg, u_char *dgst_raw, size_t dgst_raw_len,
 	 * Chars to be used after each other every time the worm
 	 * intersects with itself.  Matter of taste.
 	 */
+	char    *border_ascii[] = { "+", "-", "[", "]", "+", "|", "+", "+" };
+	char   **border;
 	char	*augmentation_string = " .o+=*BOX@%&#/^SE";
-	char	*retval, *p, title[FLDSIZE_X], hash[FLDSIZE_X];
+	char	*retval, *p, title[FLDSIZE_X - 2], hash[FLDSIZE_X - 2];
 	u_char	 field[FLDSIZE_X][FLDSIZE_Y];
 	size_t	 i, tlen, hlen;
 	u_int	 b;
 	int	 x, y, r;
 	size_t	 len = strlen(augmentation_string) - 1;
 
-	if ((retval = calloc((FLDSIZE_X + 3), (FLDSIZE_Y + 2))) == NULL)
+	if ((retval = malloc((FLDSIZE_X + 7) * FLDSIZE_Y + FLDSIZE_X * 3 * 2)) == NULL)
 		return NULL;
+
+#ifdef USE_UNICODE
+	iconv_t	 cd;
+	/* unicode character codes for box drawing
+	 * http://unicode.org/charts/PDF/U2500.pdf */
+	uint32_t border_unicode[] = {
+			0x250c, /* ┌ upper left */
+			0x2500, /* ─ horizontal */
+			0x2524, /* ┤ left of title/hash */
+			0x251c, /* ├ right of title/hash */
+			0x2510, /* ┐ upper right */
+			0x2502, /* │ vertical */
+			0x2514, /* └ lower left */
+			0x2518  /* ┘ lower right */ };
+	/* border_buffer is array of array of char
+	 * we use this to have statically allocated buffer */
+	char border_buffer[8][5];
+	/* border_encoded is array of pointer to char */
+	char *border_encoded[8];
+
+	if (isatty(fileno(stdout)) == 1) {
+		/* initialize locale */
+		setlocale(LC_ALL, "");
+
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+		cd = iconv_open(nl_langinfo(CODESET), "UTF32LE");
+#elif __BYTE_ORDER == __BIG_ENDIAN
+		cd = iconv_open(nl_langinfo(CODESET), "UTF32BE");
+#else
+#error Unknown __BYTE_ORDER
+#endif
+
+		/* encode the border elements */
+		for (int i = 0; i < 8; i++) {
+			size_t in_size = sizeof(uint32_t);;
+			size_t out_size = sizeof(border_buffer[i]);
+			char *input = (char *) &border_unicode[i];
+			char *output = border_buffer[i];
+
+			memset(border_buffer[i], 0, out_size);
+			iconv(cd, &input, &in_size, &output, &out_size);
+
+			/* if iconv() was successful we have a string with non-zero length
+			 * fall back to ascii otherwise */
+			if (border_buffer[i][0] != 0)
+				border_encoded[i] = border_buffer[i];
+			else
+				border_encoded[i] = border_ascii[i];
+		}
+
+		iconv_close(cd);
+
+		border = border_encoded;
+	} else
+#endif /* USE_UNICODE */
+		border = border_ascii;
 
 	/* initialize field */
 	memset(field, 0, FLDSIZE_X * FLDSIZE_Y * sizeof(char));
@@ -1100,47 +1164,51 @@ fingerprint_randomart(const char *alg, u_char *dgst_raw, size_t dgst_raw_len,
 	field[x][y] = len;
 
 	/* assemble title */
-	r = snprintf(title, sizeof(title), "[%s %u]",
+	r = snprintf(title, sizeof(title), "%s %u",
 		sshkey_type(k), sshkey_size(k));
-	/* If [type size] won't fit, then try [type]; fits "[ED25519-CERT]" */
+	/* If "type size" won't fit, then try "type"; fits "ED25519-CERT" */
 	if (r < 0 || r > (int)sizeof(title))
-		r = snprintf(title, sizeof(title), "[%s]", sshkey_type(k));
+		r = snprintf(title, sizeof(title), "%s", sshkey_type(k));
 	tlen = (r <= 0) ? 0 : strlen(title);
 
 	/* assemble hash ID. */
-	r = snprintf(hash, sizeof(hash), "[%s]", alg);
+	r = snprintf(hash, sizeof(hash), "%s", alg);
 	hlen = (r <= 0) ? 0 : strlen(hash);
 
 	/* output upper border */
 	p = retval;
-	*p++ = '+';
-	for (i = 0; i < (FLDSIZE_X - tlen) / 2; i++)
-		*p++ = '-';
+	p += sprintf(p, "%s", border[0]);
+	for (i = 0; i < (FLDSIZE_X - tlen - 2) / 2; i++)
+		p += sprintf(p, "%s", border[1]);
+	p += sprintf(p, "%s", border[2]);
 	memcpy(p, title, tlen);
 	p += tlen;
-	for (i += tlen; i < FLDSIZE_X; i++)
-		*p++ = '-';
-	*p++ = '+';
+	p += sprintf(p, "%s", border[3]);
+	for (i += tlen + 2; i < FLDSIZE_X; i++)
+		p += sprintf(p, "%s", border[1]);
+	p += sprintf(p, "%s", border[4]);
 	*p++ = '\n';
 
 	/* output content */
 	for (y = 0; y < FLDSIZE_Y; y++) {
-		*p++ = '|';
+		p += sprintf(p, "%s", border[5]);
 		for (x = 0; x < FLDSIZE_X; x++)
 			*p++ = augmentation_string[MINIMUM(field[x][y], len)];
-		*p++ = '|';
+		p += sprintf(p, "%s", border[5]);
 		*p++ = '\n';
 	}
 
 	/* output lower border */
-	*p++ = '+';
-	for (i = 0; i < (FLDSIZE_X - hlen) / 2; i++)
-		*p++ = '-';
+	p += sprintf(p, "%s", border[6]);
+	for (i = 0; i < (FLDSIZE_X - hlen - 2) / 2; i++)
+		p += sprintf(p, "%s", border[1]);
+	p += sprintf(p, "%s", border[2]);
 	memcpy(p, hash, hlen);
 	p += hlen;
-	for (i += hlen; i < FLDSIZE_X; i++)
-		*p++ = '-';
-	*p++ = '+';
+	p += sprintf(p, "%s", border[3]);
+	for (i += hlen + 2; i < FLDSIZE_X; i++)
+		p += sprintf(p, "%s", border[1]);
+	p += sprintf(p, "%s", border[7]);
 
 	return retval;
 }

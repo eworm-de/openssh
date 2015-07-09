@@ -453,8 +453,9 @@ do_log(LogLevel level, const char *fmt, va_list args)
 		tmp_handler(level, fmtbuf, log_handler_ctx);
 		log_handler = tmp_handler;
 	} else if (log_on_stderr) {
-		snprintf(msgbuf, sizeof msgbuf, "%s\r\n", fmtbuf);
+		/* we want unicode multi byte characters, so do not use fmtbuf here */
 		(void)write(log_stderr_fd, msgbuf, strlen(msgbuf));
+		(void)write(log_stderr_fd, "\r\n", 2);
 	} else {
 #if defined(HAVE_OPENLOG_R) && defined(SYSLOG_DATA_INIT)
 		openlog_r(argv0 ? argv0 : __progname, LOG_PID, log_facility, &sdata);
